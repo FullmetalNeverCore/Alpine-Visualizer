@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/alpine_lowend.css') }}">
+</head>
+<body>
+    <div id="menu">
+        <a id="micBtn" class="bt" style="display:none;">Permission to use input device</a>
+        <select id="deviceSelect" class="bt"></select>
+        <a id="useDeviceBtn" class="bt">Use Device</a>
+        <a id="loadFileBtn" class="bt">Load File</a>
+        <a id="clearFileBtn" class="bt" style="display:none;">Clear File</a>
+        <select id="fftSelect" class="bt"></select>
+        <input id="fileInput" type="file" accept="audio/*,video/*">
+    </div>
+    <div id="deck">
+        <img src="{{ url_for('static', filename='alpine-2.png') }}" alt="alpine">
+        <canvas id="tunnelCanvas"></canvas>
+        <img id="alpineOverlay" src="{{ url_for('static', filename='alpine-2.png') }}" alt="alpine-overlay">
+        <div id="upperOverlay">
+            <div id="textCells"></div>
+            <div id="screenText"></div>
+            <div id="fpsCounter"></div>
+            <div id="trackInfo">
+                <div class="leftCol">
+                    <div class="item active"><span class="num">1</span><span class="icon"></span></div>
+                    <div class="item"><span class="num">2</span><span class="icon"></span></div>
+                    <div class="item"><span class="num">3</span><span class="icon"></span></div>
+                </div>
+                <div class="main">
+                    <div class="discId">D1</div>
+                    <div class="title">
+                        <div class="line">DISC TITLE</div>
+                        <div class="line">TRACK TITLE</div>
+                    </div>
+                    <div class="trackRow">
+                        <div class="trackNum">???</div>
+                        <div class="trackLabel">TRACK No.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="scanlines"></div>
+        </div>
+        <div id="branding">Created by 0xNC@2025</div>
+    </div>
+    <div id="hud"></div>
+    <p id="txtStatus"></p>
+
+    <script type="module" src="{{ url_for('static', filename='js/alpine_lowend.js') }}"></script>
+</body>
+</html>
+

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/alpine.css') }}">
+</head>
+<body>
+    <div id="menu">
+        <a id="micBtn" class="bt" style="display:none;">Permission to use input device</a>
+        <select id="deviceSelect" class="bt"></select>
+        <a id="useDeviceBtn" class="bt">Use Device</a>
+        <a id="loadFileBtn" class="bt">Load File</a>
+        <input id="fileInput" type="file" accept="audio/*,video/*">
+    </div>
+    <div id="deck">
+        <img src="{{ url_for('static', filename='alpine-2.png') }}" alt="alpine">
+        <canvas id="tunnelCanvas"></canvas>
+        <img id="alpineOverlay" src="{{ url_for('static', filename='alpine-2.png') }}" alt="alpine-overlay">
+        <div id="upperOverlay">
+            <div id="textCells"></div>
+            <div id="screenText"></div>
+            <div id="vuBars"></div>
+            <div id="trackInfo">
+                <div class="leftCol">
+                    <div class="item active"><span class="num">1</span><span class="icon"></span></div>
+                    <div class="item"><span class="num">2</span><span class="icon"></span></div>
+                    <div class="item"><span class="num">3</span><span class="icon"></span></div>
+                </div>
+                <div class="main">
+                    <div class="discId">D1</div>
+                    <div class="title">
+                        <div class="line">DISC TITLE</div>
+                        <div class="line">TRACK TITLE</div>
+                    </div>
+                    <div class="trackRow">
+                        <div class="trackNum">???</div>
+                        <div class="trackLabel">TRACK No.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="scanlines"></div>
+        </div>
+        <div id="branding">Created by 0xNC@2025</div>
+    </div>
+    <div id="hud"></div>
+    <p id="txtStatus"></p>
+
+    <script>
+var audioContext
+var analyser, analyserBufferLength
+var audioInfo = 'ALPINE MODE'
+var MATHPI2 = Math.PI * 2
+var w
+var h
+var txtStatus
+var micBtn
+var deviceSelect
+var useDeviceBtn
+var canvas
+var context
+var imageData
+var data
+var mouseActive = false
+var mouseDown = false
+var mousePos = { x:0, y:0 }
+var fov = 250
+var baseSpeed = 0.6
+var idleSpeed = 0.18
+var speedGain = 7.5
+var speedAccelLerp = 0.22
+var speedDecelLerp = 0.08
+var speed = baseSpeed
+var cubeMinHeight = 2
+var frequencyDamp = 25
+var smoothingTimeConstant = 0.09
+var fftSize = 8192
+var circleHolder = []
+var time = 0
+var colorInvertValue = 0
+var rgb = { r: Math.random()*MATHPI2, g: Math.random()*MATHPI2, b: Math.random()*MATHPI2 }
+var rgb2 = { r: Math.random()*MATHPI2, g: Math.random()*MATHPI2, b: Math.random()*MATHPI2 }
+var mediaRecorder
+var latestBlob
+var recording = false
+var viewOffsetXRatio = 0.32
+var viewOffsetYRatio = 0.45
+var blockGain = 1.8
+var blockMaxRise = 45
+var bassPortion = 0.14
+var bassFloor = 55
+var bassCeil = 165
+var bootStart = 0
+var bootDuration = 1200
+
+function getRGBColor(color){ var r=Math.sin(color.r+=0.010)*1+1; var g=Math.sin(color.g+=0.007)*1+1; var b=Math.sin(color.b+=0.013)*1+1; return {r:r,g:g,b:b} }
+function getRGBColor2(color){ var r=Math.sin(color.r+=0.040)*1+1; var g=Math.sin(color.g+=0.028)*1+1; var b=Math.sin(color.b+=0.052)*1+1; return {r:r,g:g,b:b} }
+function limitRGBColor(color, percent=0.45){ if(color.r<percent) color.r=percent; if(color.g<percent) color.g=percent; if(color.b<percent) color.b=percent }
+
+function init(){
+  canvas = document.getElementById('tunnelCanvas')
+  canvas.addEventListener('mousedown', mouseDownHandler, false)
+  canvas.addEventListener('mouseup', mouseUpHandler, false)
+  canvas.addEventListener('mousemove', mouseMoveHandler, false)
+  canvas.addEventListener('mouseenter', mouseEnterHandler, false)
+  canvas.addEventListener('mouseleave', mouseLeaveHandler, false)
+  context = canvas.getContext('2d')
+  window.addEventListener('resize', onResize, false)
+  onResize()
+  var tcv=document.getElementById('tunnelCanvas'); if(tcv){ tcv.classList.add('bootOn') }
+  addCircles()
+  render()
+  clearImageData()
+  render()
+  context.putImageData(imageData, 0, 0)
+  micBtn = document.getElementById('micBtn')
+  micBtn.addEventListener('click', captureMic, false)
+  deviceSelect = document.getElementById('deviceSelect')
+  useDeviceBtn = document.getElementById('useDeviceBtn')
+  useDeviceBtn.addEventListener('click', captureSelectedDevice, false)
+  txtStatus = document.getElementById('txtStatus')
+  txtStatus.innerText = 'Choose a capture mode to visualize.'
+  setupVUBars()
+  setupTextCells()
+  if(!window._animating){ animate() }
+  var warn = document.createElement('div')
+  warn.style.position='absolute'; warn.style.top='44px'; warn.style.left='10px'; warn.style.color='#ffcc00'; warn.style.fontSize='12px'; warn.style.zIndex='3';
+  var insecure = !window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
+  var msg = 'Tip: For system audio use a loopback device (Stereo Mix/BlackHole).'
+  if(insecure){ msg = 'Tip: Use HTTPS for best capture compatibility.' }
+  warn.innerText = msg; document.body.appendChild(warn)
+  listAudioDevices()
+  setTimeout(probeLevels, 500)
+}
+
+function setupTextCells(){
+  var cells = document.getElementById('textCells')
+  var text = 'SILENTWAVE F1 87.9'
+  cells.innerHTML = ''
+  var screen = document.getElementById('screenText')
+  screen.innerHTML = ''
+  for(var i=0;i<text.length;i++){
+    var ch = text[i]
+    var cell=document.createElement('div'); cell.className='cell'+(ch===' ' ? ' space' : '')
+    cell.style.animationDelay = (i * 0.1) + 's'
+    cells.appendChild(cell)
+    var g=document.createElement('span'); g.className='glyph'; g.textContent=ch
+    g.style.animationDelay = (i * 0.1) + 's'
+    screen.appendChild(g)
+  }
+}
+
+function setupVUBars(){
+  var c = document.getElementById('vuBars')
+  c.innerHTML = ''
+  for(var i=0;i<18;i++){
+    var b=document.createElement('div'); b.className='bar'
+    var segLow=document.createElement('div'); segLow.className='seg low'; b.appendChild(segLow)
+    var segMid=document.createElement('div'); segMid.className='seg mid'; b.appendChild(segMid)
+    var segHigh=document.createElement('div'); segHigh.className='seg high'; b.appendChild(segHigh)
+    var cut=document.createElement('div'); cut.className='cut'; cut.style.bottom='42%'; b.appendChild(cut)
+    c.appendChild(b)
+  }
+}
+
+function updateVUBars(levels){
+  var wrap = document.getElementById('vuBars')
+  var bars = wrap.children
+  var H = wrap.clientHeight || 100
+  var maxTotal = 0
+  var totals = new Array(bars.length)
+  for(var i=0;i<bars.length;i++){
+    var idxBase = Math.floor(i/ bars.length * levels.length)
+    var l = (levels[Math.max(0, idxBase-6)]||0)/255
+    var m = (levels[idxBase]||0)/255
+    var h = (levels[Math.min(levels.length-1, idxBase+6)]||0)/255
+    l = Math.min(1, l*2.2); m = Math.min(1, m*2.0); h = Math.min(1, h*1.7)
+    var totalH = Math.round((H*0.90))
+    var lowH = Math.round(totalH*0.45*l)
+    var midH = Math.round(totalH*0.30*m)
+    var highH = Math.round(totalH*0.25*h)
+    var bar = bars[i]
+    var lowEl = bar.querySelector('.low')
+    var midEl = bar.querySelector('.mid')
+    var highEl = bar.querySelector('.high')
+    lowEl.style.height = lowH+'px'
+    lowEl.style.bottom = '0'
+    midEl.style.height = midH+'px'
+    midEl.style.bottom = lowH+'px'
+    highEl.style.height = highH+'px'
+    highEl.style.bottom = (lowH+midH)+'px'
+    var t = lowH+midH+highH
+    totals[i] = t
+    if(t > maxTotal) maxTotal = t
+  }
+  for(var j=0;j<bars.length;j++){
+    var cutEl = bars[j].querySelector('.cut')
+    if(cutEl){ cutEl.style.bottom = maxTotal+'px' }
+  }
+}
+
+function hasMediaDevices(){ return !!(navigator && navigator.mediaDevices) }
+function hasUserMedia(){ return hasMediaDevices() && typeof navigator.mediaDevices.getUserMedia === 'function' }
+function legacyGetUserMedia(constraints){
+  return new Promise(function(res, rej){
+    var gum = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia
+    if(!gum){ return rej(new Error('getUserMedia unsupported')) }
+    gum.call(navigator, constraints, res, rej)
+  })
+}
+async function requestUserMedia(constraints){
+  if(hasUserMedia()) return navigator.mediaDevices.getUserMedia(constraints)
+  return legacyGetUserMedia(constraints)
+}
+/* display capture removed */
+
+async function captureMic(){
+  try{
+    var stream = await requestUserMedia({ audio: true })
+    startStream(stream)
+    txtStatus.innerText = 'Microphone capture started'
+  }catch(e){ txtStatus.innerText = 'Microphone access denied' }
+}
+
+async function listAudioDevices(){
+  try{
+    await requestUserMedia({ audio: true })
+  }catch(_){ }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return
+  var devices = await navigator.mediaDevices.enumerateDevices()
+  var options = devices.filter(function(d){ return d.kind === 'audioinput' })
+  deviceSelect.innerHTML = ''
+  options.forEach(function(d){ var o=document.createElement('option'); o.value=d.deviceId; o.text=d.label||('Device '+d.deviceId); deviceSelect.appendChild(o) })
+}
+
+async function captureSelectedDevice(){
+  try{
+    var id = deviceSelect.value
+    if(!id){ txtStatus.innerText = 'No device selected'; return }
+    var stream = await requestUserMedia({ audio: { deviceId: id ? { exact: id } : undefined, echoCancellation:false, noiseSuppression:false, autoGainControl:false } })
+    startStream(stream)
+    txtStatus.innerText = 'Using selected device'
+    var items=document.querySelectorAll('#trackInfo .leftCol .item');
+    items.forEach(function(it){ it.classList.remove('dim') })
+    if(items[0]) items[0].classList.add('dim')
+    if(items[2]) items[2].classList.add('dim')
+    var disc=document.querySelector('#trackInfo .discId'); if(disc){ disc.textContent='D2' }
+  }catch(e){ txtStatus.innerText = 'Device start failed' }
+}
+
+/* removed system/tab capture functions */
+
+function startStream(stream){
+  if(audioContext && typeof audioContext.close === 'function'){ try{ audioContext.close() }catch(_){} }
+  audioContext = new (window.AudioContext||window.webkitAudioContext)()
+  if(audioContext.state === 'suspended'){ try{ audioContext.resume() }catch(_){} }
+  stream.getAudioTracks().forEach(function(t){ t.enabled = true })
+  analyser = audioContext.createAnalyser()
+  analyser.smoothingTimeConstant = smoothingTimeConstant
+  var src = audioContext.createMediaStreamSource(stream)
+  src.connect(analyser)
+  try{ var mute = audioContext.createGain(); mute.gain.value = 0; analyser.connect(mute); mute.connect(audioContext.destination) }catch(_){}
+  analyser.fftSize = fftSize
+  analyserBufferLength = analyser.frequencyBinCount
+  if(typeof MediaRecorder !== 'undefined'){
+    try{ if(mediaRecorder && mediaRecorder.state !== 'inactive'){ mediaRecorder.stop() } }catch(_){ }
+    latestBlob = null
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    mediaRecorder.ondataavailable = function(e){ if(e.data && e.data.size > 0){ latestBlob = e.data } }
+    mediaRecorder.start(1000)
+    recording = true
+  }
+}
+
+function probeLevels(){
+  if(!analyser) return
+  var buf = new Uint8Array(analyser.frequencyBinCount)
+  var silentFrames = 0
+  function tick(){
+    if(!analyser) return
+    analyser.getByteFrequencyData(buf)
+    var energy = 0
+    for(var i=0;i<buf.length;i++){ energy += buf[i] }
+    energy = energy / buf.length
+    if(energy < 1){ silentFrames++ } else { silentFrames = 0 }
+    if(silentFrames > 120){ txtStatus.innerText = 'No audio detected. Check device levels or enable Stereo Mix'; silentFrames = 0 }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+/* removed default audio setup */
+
+function clearImageData(){ for(var i=0,l=data.length;i<l;i+=4){ data[i]=0; data[i+1]=0; data[i+2]=0; data[i+3]=255 } }
+function setPixel(x,y,r,g,b,a){ var i=(x+y*imageData.width)*4; data[i]=r; data[i+1]=g; data[i+2]=b; data[i+3]=a }
+
+function drawLine(x1,y1,x2,y2,r,g,b,a){ var dx=Math.abs(x2-x1); var dy=Math.abs(y2-y1); var sx=(x1<x2)?1:-1; var sy=(y1<y2)?1:-1; var err=dx-dy; var lx=x1; var ly=y1; while(true){ if(lx>0&&lx<w&&ly>0&&ly<h){ setPixel(lx,ly,r,g,b,a) } if((lx===x2)&&(ly===y2)) break; var e2=2*err; if(e2>-dx){ err-=dy; lx+=sx } if(e2<dy){ err+=dx; ly+=sy } } }
+function getCirclePosition(centerX,centerY,radius,index,segments){ var angle=index*(MATHPI2/segments)+time; var x=centerX+Math.cos(angle)*radius; var y=centerY+Math.sin(angle)*radius; return {x:x,y:y} }
+function drawCircle(centerPosition,radius,segments){ var coordinates=[]; var radiusSave; var diff=0; for(var i=0;i<=segments;i++){ var radiusRandom=radius; if(i===0){ radiusSave=radiusRandom } if(i===segments){ radiusRandom=radiusSave } var centerX=centerPosition.x; var centerY=centerPosition.y; var position=getCirclePosition(centerX,centerY,radiusRandom,i,segments); coordinates.push({ x:position.x, y:position.y, index:i+diff, radius:radiusRandom, segments:segments }) } return coordinates }
+function addCircleSegment(x,y,z,audioBufferIndex){ var circleSegment={}; circleSegment.x=x; circleSegment.y=y; circleSegment.x2d=0; circleSegment.y2d=0; circleSegment.audioBufferIndex=audioBufferIndex; return circleSegment }
+
+function addCircles(){
+  var audioBufferIndexMin=8; var audioBufferIndexMax=1024; var audioBufferIndex=audioBufferIndexMin
+  var centerPosition={ x:0, y:0 }; var center={ x:0, y:0 }
+  var toggle=1; var index=0; var audioIndex=audioBufferIndexMin
+  var mp={ x:Math.random()*w, y:Math.random()*h }
+  for(var z=-fov; z<fov; z+=5){
+    var coordinates=drawCircle(centerPosition,75,64)
+    var circleObj={}; circleObj.segmentsOutside=[]; circleObj.segmentsInside=[]; circleObj.segmentsInside2=[]; circleObj.segmentsCount=0; circleObj.index=index; circleObj.z=z; circleObj.center=center; circleObj.circleCenter={ x:0, y:0 }; circleObj.mp={ x:mp.x, y:mp.y }; circleObj.radius=coordinates[0].radius; circleObj.color={ r:0,g:0,b:0 }
+    toggle=index%2; index++
+    if(z<0){ audioIndex++ } else { audioIndex-- }
+    audioBufferIndex=Math.floor(Math.random()*audioBufferIndexMax)+audioBufferIndexMin
+    var circleSegmentOutside
+    for(var i=0,l=coordinates.length;i<l;i++){
+      var coordinate=coordinates[i]
+      if(i%2===toggle){
+        circleSegmentOutside=addCircleSegment(coordinate.x,coordinate.y,z,audioBufferIndex)
+        circleSegmentOutside.active=true; circleSegmentOutside.index=coordinate.index; circleSegmentOutside.radius=coordinate.radius; circleSegmentOutside.radiusAudio=circleSegmentOutside.radius; circleSegmentOutside.segments=coordinate.segments; circleSegmentOutside.coordinates=[]
+        var co; if(i>0){ co=coordinates[i-1] } else { co=coordinates[l-1] }
+        var sub1=addCircleSegment(co.x,co.y,z,audioBufferIndex)
+        var sub2=addCircleSegment(coordinate.x,coordinate.y,z-5,audioBufferIndex)
+        var sub3=addCircleSegment(co.x,co.y,z-5,audioBufferIndex)
+        var sub4=addCircleSegment(coordinate.x,coordinate.y,z,audioBufferIndex)
+        var sub5=addCircleSegment(co.x,co.y,z,audioBufferIndex)
+        var sub6=addCircleSegment(coordinate.x,coordinate.y,z-5,audioBufferIndex)
+        var sub7=addCircleSegment(co.x,co.y,z-5,audioBufferIndex)
+        sub1.index=co.index; sub2.index=coordinate.index; sub3.index=co.index; sub4.index=coordinate.index; sub5.index=co.index; sub6.index=coordinate.index; sub7.index=co.index
+        circleSegmentOutside.subs=[]; circleSegmentOutside.subs.push(sub1,sub2,sub3,sub4,sub5,sub6,sub7)
+        if(i<l-1){ audioBufferIndex=Math.floor(Math.random()*audioBufferIndexMax)+audioBufferIndexMin } else { audioBufferIndex=circleObj.segmentsOutside[0].audioBufferIndex }
+        circleObj.segmentsOutside.push(circleSegmentOutside)
+      } else { circleObj.segmentsOutside.push({ active:false }) }
+    }
+    circleHolder.push(circleObj)
+  }
+}
+
+function onResize(){
+  var rect = canvas.getBoundingClientRect()
+  w = Math.max(1, Math.floor(rect.width))
+  h = Math.max(1, Math.floor(rect.height))
+  canvas.width = w
+  canvas.height = h
+  context.fillStyle = '#000000'
+  context.fillRect(0,0,w,h)
+  imageData = context.getImageData(0,0,w,h)
+  data = imageData.data
+}
+
+/* no player controls */
+function mouseDownHandler(){}
+function mouseUpHandler(){}
+function mouseEnterHandler(){}
+function mouseLeaveHandler(){}
+function mouseMoveHandler(event){}
+function getMousePos(canvas,event){ var rect=canvas.getBoundingClientRect(); return { x:event.clientX-rect.left, y:event.clientY-rect.top } }
+
+function render(){
+  var now = performance.now()
+  if(bootStart===0){ bootStart = now }
+  var bootT = Math.min(1, (now-bootStart)/bootDuration)
+  var bootEase = bootT*bootT*(3-2*bootT)
+  var aa=false; if(analyser){ aa=true }
+  var frequencySource; if(aa===true){ frequencySource=new Uint8Array(analyser.frequencyBinCount); analyser.getByteFrequencyData(frequencySource); updateVUBars(frequencySource) }
+  if(aa===true){
+    var bins = frequencySource.length
+    var end = Math.max(8, Math.floor(bins*bassPortion))
+    var energy=0
+    for(var ei=0; ei<end; ei++){ energy += frequencySource[ei] }
+    energy = energy / end
+    var norm = 0
+    if(energy > bassFloor){ norm = Math.min(1, (energy-bassFloor)/(bassCeil-bassFloor)) }
+    var targetBase = norm>0 ? baseSpeed : idleSpeed
+    var target = targetBase + norm * speedGain
+    var lerp = target < speed ? speedDecelLerp : speedAccelLerp
+    speed += (target - speed) * lerp
+  } else {
+    speed += (idleSpeed - speed) * speedDecelLerp
+  }
+  speed *= bootEase
+  var sortArray=false
+  var col=getRGBColor2(rgb); var col2=getRGBColor(rgb2); limitRGBColor(col,0.45); limitRGBColor(col2,0.25)
+  for(var i=0,l=circleHolder.length;i<l;i++){
+    var circleObj=circleHolder[i]
+    circleObj.color.r=col.r-(circleObj.z+fov)/fov; circleObj.color.g=col.g-(circleObj.z+fov)/fov; circleObj.color.b=col.b-(circleObj.z+fov)/fov
+    if(circleObj.color.r<col2.r){ circleObj.color.r=col2.r } if(circleObj.color.g<col2.g){ circleObj.color.g=col2.g } if(circleObj.color.b<col2.b){ circleObj.color.b=col2.b }
+    var circleObjBack; if(i>0){ circleObjBack=circleHolder[i-1] }
+    var vmx = w * viewOffsetXRatio
+    var vmy = h * viewOffsetYRatio
+    circleObj.center.x = ((w/1.6) - vmx) / ((circleObj.z - fov) / 250) + w / 1.2
+    circleObj.center.y = ((h/2) - vmy) / ((circleObj.z - fov) / 250) + h / 2
+    for(var j=0,k=circleObj.segmentsOutside.length;j<k;j++){
+      var circleSegmentOutside=circleObj.segmentsOutside[j]
+      if(circleSegmentOutside.active===true){
+        var scale=fov/(fov+circleObj.z); var scaleBack; if(i>0){ scaleBack=fov/(fov+circleObjBack.z) }
+        var frequency,frequencyAdd
+        circleSegmentOutside.x2d=(circleSegmentOutside.x*scale)+circleObj.center.x
+        circleSegmentOutside.y2d=(circleSegmentOutside.y*scale)+circleObj.center.y
+        if(aa===true){
+          frequency=(frequencySource[circleSegmentOutside.audioBufferIndex]||0)
+          var amt = Math.min(blockMaxRise, (frequency/20)*blockGain)
+          frequencyAdd = amt
+          circleSegmentOutside.radiusAudio = circleSegmentOutside.radius - frequencyAdd
+        }
+        var lineColorValue=0
+        if(j>0){ if(aa===true){ lineColorValue=Math.round(i/l*(55+frequency)); if(lineColorValue>255){ lineColorValue=255 } } else { lineColorValue=Math.round(i/l*200) } }
+        if(i>0 && i<l-1){
+          var sub1=circleSegmentOutside.subs[0]; var sub1angle=sub1.index*(MATHPI2/circleSegmentOutside.segments)+time; sub1.x2d=(sub1.x*scale)+circleObj.center.x; sub1.y2d=(sub1.y*scale)+circleObj.center.y; sub1.x=circleObj.circleCenter.x+Math.cos(sub1angle)*circleSegmentOutside.radiusAudio; sub1.y=circleObj.circleCenter.y+Math.sin(sub1angle)*circleSegmentOutside.radiusAudio
+          var sub2=circleSegmentOutside.subs[1]; var sub2angle=sub2.index*(MATHPI2/circleSegmentOutside.segments)+time; sub2.x2d=(sub2.x*scaleBack)+circleObjBack.center.x; sub2.y2d=(sub2.y*scaleBack)+circleObjBack.center.y; sub2.x=circleObj.circleCenter.x+Math.cos(sub2angle)*circleSegmentOutside.radiusAudio; sub2.y=circleObj.circleCenter.y+Math.sin(sub2angle)*circleSegmentOutside.radiusAudio
+          var sub3=circleSegmentOutside.subs[2]; var sub3angle=sub3.index*(MATHPI2/circleSegmentOutside.segments)+time; sub3.x2d=(sub3.x*scaleBack)+circleObjBack.center.x; sub3.y2d=(sub3.y*scaleBack)+circleObjBack.center.y; sub3.x=circleObj.circleCenter.x+Math.cos(sub3angle)*circleSegmentOutside.radiusAudio; sub3.y=circleObj.circleCenter.y+Math.sin(sub3angle)*circleSegmentOutside.radiusAudio
+          var sub4=circleSegmentOutside.subs[3]; var sub4angle=sub4.index*(MATHPI2/circleSegmentOutside.segments)+time; sub4.x2d=(sub4.x*scale)+circleObj.center.x; sub4.y2d=(sub4.y*scale)+circleObj.center.y; sub4.x=circleObj.circleCenter.x+Math.cos(sub4angle)*circleSegmentOutside.radius; sub4.y=circleObj.circleCenter.y+Math.sin(sub4angle)*circleSegmentOutside.radius
+          var sub5=circleSegmentOutside.subs[4]; var sub5angle=sub5.index*(MATHPI2/circleSegmentOutside.segments)+time; sub5.x2d=(sub5.x*scale)+circleObj.center.x; sub5.y2d=(sub5.y*scale)+circleObj.center.y; sub5.x=circleObj.circleCenter.x+Math.cos(sub5angle)*circleSegmentOutside.radius; sub5.y=circleObj.circleCenter.y+Math.sin(sub5angle)*circleSegmentOutside.radius
+          var sub6=circleSegmentOutside.subs[5]; var sub6angle=sub6.index*(MATHPI2/circleSegmentOutside.segments)+time; sub6.x2d=(sub6.x*scaleBack)+circleObjBack.center.x; sub6.y2d=(sub6.y*scaleBack)+circleObjBack.center.y; sub6.x=circleObj.circleCenter.x+Math.cos(sub6angle)*circleSegmentOutside.radius; sub6.y=circleObj.circleCenter.y+Math.sin(sub6angle)*circleSegmentOutside.radius
+          var sub7=circleSegmentOutside.subs[6]; var sub7angle=sub7.index*(MATHPI2/circleSegmentOutside.segments)+time; sub7.x2d=(sub7.x*scaleBack)+circleObjBack.center.x; sub7.y2d=(sub7.y*scaleBack)+circleObjBack.center.y; sub7.x=circleObj.circleCenter.x+Math.cos(sub7angle)*circleSegmentOutside.radius; sub7.y=circleObj.circleCenter.y+Math.sin(sub7angle)*circleSegmentOutside.radius
+          var p1=circleSegmentOutside; var p2=circleSegmentOutside.subs[1]; var p3=circleSegmentOutside.subs[2]; var p4=circleSegmentOutside.subs[0]
+          var p5=circleSegmentOutside.subs[3]; var p6=circleSegmentOutside.subs[4]; var p7=circleSegmentOutside.subs[6]; var p8=circleSegmentOutside.subs[5]
+          var cr=Math.round(circleObj.color.r*lineColorValue); var cg=Math.round(circleObj.color.g*lineColorValue); var cb=Math.round(circleObj.color.b*lineColorValue)
+          drawLine(p1.x2d|0,p1.y2d|0,p2.x2d|0,p2.y2d|0,cr,cg,cb,255); drawLine(p2.x2d|0,p2.y2d|0,p3.x2d|0,p3.y2d|0,cr,cg,cb,255); drawLine(p3.x2d|0,p3.y2d|0,p4.x2d|0,p4.y2d|0,cr,cg,cb,255); drawLine(p4.x2d|0,p4.y2d|0,p1.x2d|0,p1.y2d|0,cr,cg,cb,255); drawLine(p5.x2d|0,p5.y2d|0,p1.x2d|0,p1.y2d|0,cr,cg,cb,255); drawLine(p6.x2d|0,p6.y2d|0,p4.x2d|0,p4.y2d|0,cr,cg,cb,255); drawLine(p7.x2d|0,p7.y2d|0,p3.x2d|0,p3.y2d|0,cr,cg,cb,255); drawLine(p8.x2d|0,p8.y2d|0,p2.x2d|0,p2.y2d|0,cr,cg,cb,255)
+          if(circleObj.z<fov/2){ drawLine(p5.x2d|0,p5.y2d|0,p6.x2d|0,p6.y2d|0,cr,cg,cb,255); drawLine(p6.x2d|0,p6.y2d|0,p7.x2d|0,p7.y2d|0,cr,cg,cb,255); drawLine(p7.x2d|0,p7.y2d|0,p8.x2d|0,p8.y2d|0,cr,cg,cb,255); drawLine(p8.x2d|0,p8.y2d|0,p5.x2d|0,p5.y2d|0,cr,cg,cb,255) }
+        }
+        var circleSegmentOutsideangle = circleSegmentOutside.index*(MATHPI2/circleSegmentOutside.segments)+time
+        circleSegmentOutside.x = circleObj.circleCenter.x + Math.cos(circleSegmentOutsideangle)*circleSegmentOutside.radiusAudio
+        circleSegmentOutside.y = circleObj.circleCenter.y + Math.sin(circleSegmentOutsideangle)*circleSegmentOutside.radiusAudio
+      }
+    }
+    circleObj.z -= speed; if(circleObj.z<-fov){ circleObj.z += (fov*2); sortArray=true }
+  }
+  if(sortArray){ circleHolder = circleHolder.sort(function(a,b){ return (b.z-a.z) }) }
+  time -= 0.005
+  if(mouseDown){ if(colorInvertValue<255) colorInvertValue+=5; else colorInvertValue=255; softInvert(colorInvertValue) } else { if(colorInvertValue>0) colorInvertValue-=5; else colorInvertValue=0; if(colorInvertValue>0) softInvert(colorInvertValue) }
+}
+
+function softInvert(value){ for(var j=0,n=data.length;j<n;j+=4){ data[j]=Math.abs(value-data[j]); data[j+1]=Math.abs(value-data[j+1]); data[j+2]=Math.abs(value-data[j+2]); data[j+3]=255 } }
+function animate(){ window._animating=true; clearImageData(); render(); context.putImageData(imageData,0,0); requestAnimationFrame(animate) }
+window.requestAnimFrame=(function(){ return window.requestAnimationFrame||window.webkitRequestAnimationFrame||window.mozRequestAnimationFrame||function(callback){ window.setTimeout(callback,1000/60) } })()
+function boot(){ var bg=document.querySelector('#deck > img'); var ov=document.getElementById('alpineOverlay'); var waits=[]; function w(img){ if(!img) return; if(img.complete) return; waits.push(new Promise(function(res){ img.addEventListener('load', res, {once:true}); img.addEventListener('error', res, {once:true}) })) } w(bg); w(ov); if(waits.length>0){ Promise.all(waits).then(init) } else { init() } }
+function attachFileLoader(){ var btn=document.getElementById('loadFileBtn'); var inp=document.getElementById('fileInput'); if(!btn||!inp) return; btn.addEventListener('click', function(){ inp.click() }); inp.addEventListener('change', async function(){ var f=inp.files&&inp.files[0]; if(!f) return; try{ var url=URL.createObjectURL(f); var audioEl=new Audio(); audioEl.src=url; audioEl.crossOrigin='anonymous'; audioEl.loop=true; audioEl.muted=false; await audioEl.play().catch(function(){}); if(audioContext && typeof audioContext.close==='function'){ try{ audioContext.close() }catch(_){} } audioContext=new (window.AudioContext||window.webkitAudioContext)(); if(audioContext.state==='suspended'){ try{ audioContext.resume() }catch(_){} } analyser=audioContext.createAnalyser(); analyser.smoothingTimeConstant=smoothingTimeConstant; analyser.fftSize=fftSize; var src=audioContext.createMediaElementSource(audioEl); var playback=audioContext.createGain(); playback.gain.value=1.0; src.connect(analyser); src.connect(playback); playback.connect(audioContext.destination); txtStatus.innerText='Playing '+(f.name||'file'); var titleEl=document.querySelector('#trackInfo .title .line:nth-child(2)'); if(titleEl){ var dn=(f.name||'TRACK TITLE').replace(/\.[^/.]+$/, ''); typeWrite(titleEl, dn, 50) } var numEl=document.querySelector('#trackInfo .trackNum'); if(numEl){ numEl.textContent='001' } var items=document.querySelectorAll('#trackInfo .leftCol .item'); if(items[1]) items[1].classList.add('dim'); if(items[2]) items[2].classList.add('dim') }catch(e){ txtStatus.innerText='File load failed' } }) }
+function typeWrite(el, text, delay){ if(!el) return; el.textContent=''; var i=0; function tick(){ if(i<=text.length){ el.textContent=text.slice(0,i); i++; setTimeout(tick, delay) } } tick() }
+attachFileLoader()
+boot()
+    </script>
+</body>
+</html>
+
+

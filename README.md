@@ -2,7 +2,7 @@
 
 Alpine is a real-time audio visualizer that creates stunning 3D tunnel effects synchronized to your audio input. Experience your music like never before with this immersive WebGL-based visualization engine.
 
-![Alpine Visualizer Screenshot](https://imgur.com/a/ygXjN6R)
+![Alpine Visualizer Screenshot](https://i.imgur.com/92bvUXM.jpeg)
 
 ## System Audio Setup
 

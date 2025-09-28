@@ -1,0 +1,36 @@
+@import url('/static/css/alpine.css');
+
+#upperOverlay .scanlines { display: block !important; opacity: 0.3 !important; }
+
+
+@keyframes bulbFlicker {
+  0% { opacity: 0; filter: brightness(0.6) blur(0.5px) }
+  10% { opacity: .8 }
+  20% { opacity: .3 }
+  35% { opacity: .9 }
+  55% { opacity: .4 }
+  75% { opacity: .95 }
+  100% { opacity: 1; filter: none }
+}
+
+#trackInfo .leftCol .item { animation: bulbFlicker 900ms ease-out forwards, glowIn 600ms ease-out forwards 180ms; }
+#trackInfo .leftCol .item:nth-child(2) { animation-delay: 0ms, 260ms }
+#trackInfo .leftCol .item:nth-child(3) { animation-delay: 0ms, 340ms }
+
+#trackInfo .discId { animation: bulbFlicker 900ms ease-out forwards, glowIn 700ms ease-out forwards 220ms; }
+#trackInfo .title { animation: bulbFlicker 900ms ease-out forwards, glowIn 700ms ease-out forwards 320ms; }
+#trackInfo .trackRow { animation: bulbFlicker 900ms ease-out forwards, glowIn 700ms ease-out forwards 420ms; }
+
+#fpsCounter{
+  position:absolute;
+  left:115%; /* place just to the left of VU bars (which start at 34%) */
+  bottom:1.0vw;
+  color:#ffe07a;
+  font-family:'DigitalDreamSkew', monospace;
+  font-size:1.0vw;
+  letter-spacing:0;
+  text-shadow:0 0 0.6vw rgba(255,224,122,.45);
+  pointer-events:none;
+  z-index: 13;
+}
+
