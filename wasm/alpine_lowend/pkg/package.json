@@ -1,0 +1,15 @@
+{
+  "name": "alpine_lowend_wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "alpine_lowend_wasm_bg.wasm",
+    "alpine_lowend_wasm.js",
+    "alpine_lowend_wasm.d.ts"
+  ],
+  "main": "alpine_lowend_wasm.js",
+  "types": "alpine_lowend_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
