@@ -13,9 +13,14 @@
         <select id="deviceSelect" class="bt"></select>
         <a id="useDeviceBtn" class="bt">Use Device</a>
         <a id="loadFileBtn" class="bt">Load File</a>
+        <a id="silentwaveBtn" class="bt">Silentwave. freq</a>
         <a id="clearFileBtn" class="bt" style="display:none;">Clear File</a>
         <select id="fftSelect" class="bt"></select>
         <input id="fileInput" type="file" accept="audio/*,video/*">
+        <div class="control-container">
+            <label for="sensitivitySlider">Sensitivity</label>
+            <input type="range" id="sensitivitySlider" min="5" max="40" value="22" class="slider">
+        </div>
     </div>
     <div id="deck">
         <img src="{{ url_for('static', filename='alpine-2.png') }}" alt="alpine">
@@ -50,7 +55,10 @@
     <div id="hud"></div>
     <p id="txtStatus"></p>
 
+    <audio id="silentwaveAudio" controls hidden crossorigin="anonymous">
+        <source src="{{ stream_url }}" type="audio/mpeg">
+    </audio>
+
     <script type="module" src="{{ url_for('static', filename='js/alpine_lowend.js') }}"></script>
 </body>
 </html>
-
