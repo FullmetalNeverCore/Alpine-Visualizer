@@ -76,9 +76,9 @@ static mut RENDER_SCALE: f32 = 1.0; // 0.5 for half resolution
 static mut SKIP_FRAME_COUNT: u8 = 0;
 
 const PI2: f32 = std::f32::consts::PI * 2.0;
-const FOV: f32 = 400.0;
+const FOV: f32 = 200.0;
 const SPEED: f32 = 0.6;
-const FREQUENCY_DAMP: f32 = 18.0;
+static mut FREQUENCY_DAMP: f32 = 18.0;
 const PERSPECTIVE_OFFSET_X: f32 = -120.0;
 const PERSPECTIVE_OFFSET_Y: f32 = -20.0;
 const PERSPECTIVE_DEPTH_DIVISOR: f32 = 380.0;
@@ -88,6 +88,7 @@ const OUTER_GLOW_RADIUS: i32 = 4;     // balanced blur radius
 const OUTER_GLOW_OPACITY: f32 = 0.70; // overall opacity of glow
 const GLOW_GAMMA: f32 = 0.66;         // <1 brightens halo falloff
 const BEAM_ADD: f32 = 0.85;           // additive beam strength
+const MESH_THICKNESS: i32 = 1;
 static mut COS_TABLE: Option<Vec<f32>> = None;
 static mut SIN_TABLE: Option<Vec<f32>> = None;
 const SATURATION_BOOST: f32 = 5.6;    // >1 increases color saturation
@@ -103,6 +104,14 @@ pub fn set_low_end_mode(enabled: bool) {
             ENABLE_GLOW = false;
             ENABLE_SMOOTHING = false;
         }
+    }
+}
+
+
+#[wasm_bindgen]
+pub fn set_sensitivity(value: f32) {
+    unsafe {
+        FREQUENCY_DAMP = value.max(1.0);
     }
 }
 
@@ -398,6 +407,7 @@ pub fn wasm_set_screen_text(s: &str) {
                     }
                     preset_container.append_child(&btn).ok();
                 }
+
                 let preset_label: HtmlElement = document.create_element("div").unwrap().unchecked_into();
                 preset_label.set_text_content(Some("PRESET"));
                 let preset_label_style = preset_label.style();
@@ -571,12 +581,14 @@ fn draw_line(buf: &mut [u8], w: usize, h: usize, x1: i32, y1: i32, x2: i32, y2: 
     let sy = if y1 < y2 { 1 } else { -1 };
     let mut err = dx - dy;
     
+    // Pre-calculate for faster pixel access
     let w4 = w * 4;
     
     loop {
         if x0 >= 0 && x0 < w_i32 && y0 >= 0 && y0 < h_i32 {
             let i = (y0 as usize) * w4 + (x0 as usize) * 4;
             unsafe {
+                // Use unchecked access for performance (we already bounds checked)
                 *buf.get_unchecked_mut(i) = r;
                 *buf.get_unchecked_mut(i + 1) = g;
                 *buf.get_unchecked_mut(i + 2) = b;
@@ -684,6 +696,7 @@ pub fn wasm_render_frame() {
     let enable_glow = unsafe { ENABLE_GLOW && !LOW_END_MODE };
     let enable_smoothing = unsafe { ENABLE_SMOOTHING && !LOW_END_MODE };
 
+
     let frame = unsafe {
         let needed = w * h * 4;
         match FRAME_BUFFER.as_mut() {
@@ -772,7 +785,7 @@ pub fn wasm_render_frame() {
                         seg.y2d = seg.y * scale + circle.center_y;
                         
                         let frequency = vu_data[seg.audio_buffer_index % vu_data.len()] as f32;
-                        let frequency_add = frequency / FREQUENCY_DAMP * (1.0 + beat_boost*0.3);
+                        let frequency_add = frequency / unsafe { FREQUENCY_DAMP } * (1.0 + beat_boost*0.3);
                         
                         seg.radius_audio = seg.radius - frequency_add;
                         
@@ -786,6 +799,7 @@ pub fn wasm_render_frame() {
                             let brightness_base = 20.0 + energy_avg * 200.0;
                             let line_value = ((i as f32 / total as f32) * (brightness_base + frequency)).min(255.0);
 
+                            // Depth fog per row (cheap)
                             // Fog only for far side (positive z). Near (negative z) remains clear.
                             let mut fog = if circle.z <= FOG_NEAR_Z { 0.0 } else { ((circle.z - FOG_NEAR_Z) / (FOG_FAR_Z - FOG_NEAR_Z)).clamp(0.0, 1.0) };
                             // smoothstep
@@ -895,24 +909,24 @@ pub fn wasm_render_frame() {
                             
                             // Draw inner face only if there's audio deformation
                             if frequency_add > 0.0 {
-                                draw_line(frame, w, h, p1.0, p1.1, p2.0, p2.1, cr, cg, cb);
-                                draw_line(frame, w, h, p2.0, p2.1, p3.0, p3.1, cr, cg, cb);
-                                draw_line(frame, w, h, p3.0, p3.1, p4.0, p4.1, cr, cg, cb);
-                                draw_line(frame, w, h, p4.0, p4.1, p1.0, p1.1, cr, cg, cb);
-                                
+                                draw_thick_line(frame, w, h, p1.0, p1.1, p2.0, p2.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p2.0, p2.1, p3.0, p3.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p3.0, p3.1, p4.0, p4.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p4.0, p4.1, p1.0, p1.1, cr, cg, cb, MESH_THICKNESS);
+
                                 // Connecting edges
-                                draw_line(frame, w, h, p5.0, p5.1, p1.0, p1.1, cr, cg, cb);
-                                draw_line(frame, w, h, p6.0, p6.1, p4.0, p4.1, cr, cg, cb);
-                                draw_line(frame, w, h, p7.0, p7.1, p3.0, p3.1, cr, cg, cb);
-                                draw_line(frame, w, h, p8.0, p8.1, p2.0, p2.1, cr, cg, cb);
+                                draw_thick_line(frame, w, h, p5.0, p5.1, p1.0, p1.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p6.0, p6.1, p4.0, p4.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p7.0, p7.1, p3.0, p3.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p8.0, p8.1, p2.0, p2.1, cr, cg, cb, MESH_THICKNESS);
                             }
-                            
+
                             // Outer face (if close enough)
                             if circle.z < FOV / 3.0 && !unsafe { LOW_END_MODE } {
-                                draw_line(frame, w, h, p5.0, p5.1, p6.0, p6.1, cr, cg, cb);
-                                draw_line(frame, w, h, p6.0, p6.1, p7.0, p7.1, cr, cg, cb);
-                                draw_line(frame, w, h, p7.0, p7.1, p8.0, p8.1, cr, cg, cb);
-                                draw_line(frame, w, h, p8.0, p8.1, p5.0, p5.1, cr, cg, cb);
+                                draw_thick_line(frame, w, h, p5.0, p5.1, p6.0, p6.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p6.0, p6.1, p7.0, p7.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p7.0, p7.1, p8.0, p8.1, cr, cg, cb, MESH_THICKNESS);
+                                draw_thick_line(frame, w, h, p8.0, p8.1, p5.0, p5.1, cr, cg, cb, MESH_THICKNESS);
                             }
                         }
                         
@@ -955,6 +969,7 @@ pub fn wasm_render_frame() {
             TIME += 0.005;
         }
         
+        // Update VU DOM heights every frame (smooth)
         if let (Some(segs), Some(cuts), Some(lows), Some(mids), Some(highs)) = (VU_SEGS.as_ref(), VU_CUTS.as_ref(), VU_LOW.as_ref(), VU_MID.as_ref(), VU_HIGH.as_ref()) {
             let cols = segs.len();
             let bins = VU_ACTIVE_BINS.max(1);
@@ -1006,7 +1021,7 @@ pub fn wasm_render_frame() {
                 highs[i].style().set_property("bottom", &format!("{}%", high_bottom)).ok();
             }
         }
-        } 
+        } // end VU bars
 
         if let Some(blocks) = unsafe { MINI_VU_BLOCKS.as_ref() } {
             let bins = unsafe { VU_ACTIVE_BINS.max(1) };
@@ -1081,7 +1096,6 @@ pub fn wasm_render_frame() {
             }
         }
 
-        // Apply gamma to glow for beam-like falloff
         for i in (0..(w * h * 4)).step_by(4) {
             let r = (temp[i] as f32 / 255.0).powf(GLOW_GAMMA);
             let g = (temp[i + 1] as f32 / 255.0).powf(GLOW_GAMMA);
@@ -1092,6 +1106,7 @@ pub fn wasm_render_frame() {
             temp[i + 3] = 255;
         }
 
+        // Beam-like additive blend: out = base + glow * opacity * BEAM_ADD
         for i in (0..(w * h * 4)).step_by(4) {
             // slight line boost to emphasize core
             let line_boost = 1.10f32;
@@ -1129,7 +1144,7 @@ pub fn wasm_render_frame() {
             frame[i] = r8; frame[i + 1] = g8; frame[i + 2] = b8; frame[i + 3] = 255;
             prev[i] = r8; prev[i + 1] = g8; prev[i + 2] = b8; prev[i + 3] = 255;
         }
-        }
+        } 
 
         let quiet = (energy_avg * 1.15).min(1.0);
         let darken_factor = 0.85 + 0.15 * quiet;
